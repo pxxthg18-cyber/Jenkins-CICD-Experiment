@@ -47,7 +47,7 @@ def test_health_endpoint_json_payload(client):
     data = response.get_json()
     assert data["status"] == "healthy"
     assert data["app"] == "jenkins-cicd-flask-app"
-    assert data["version"] == "1.0.0"
+    assert data["version"] == "1.0.1"
 
 
 def test_invalid_route_returns_404(client):

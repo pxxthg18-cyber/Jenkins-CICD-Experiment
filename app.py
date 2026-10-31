@@ -164,7 +164,7 @@ def health():
     return jsonify(
         status="healthy",
         app="jenkins-cicd-flask-app",
-        version="1.0.0"
+        version="1.0.1"
     ), 200
 
 
