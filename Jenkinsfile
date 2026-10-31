@@ -10,12 +10,12 @@ pipeline {
         choice(
             name: 'DEPLOY_ENV',
             choices: ['local', 'cloud'],
-            description: 'Target environment: local container or cloud platform'
+            description: 'Target deployment environment'
         )
         string(
             name: 'APP_PORT',
             defaultValue: '5000',
-            description: 'Port mapped to host for accessing the Flask service'
+            description: 'Host port for application access'
         )
     }
 
@@ -23,7 +23,8 @@ pipeline {
         IMAGE_NAME     = 'jenkins-cicd-flask-app'
         IMAGE_TAG      = "${BUILD_NUMBER}"
         CONTAINER_NAME = 'flask-app-prod'
-        HOST_PORT      = "${params.APP_PORT}"
+        TARGET_ENV     = "${params.DEPLOY_ENV ?: 'local'}"
+        HOST_PORT      = "${params.APP_PORT ?: '5000'}"
 
         /*
          * Credentials configured under: Jenkins -> Manage Jenkins -> Credentials
@@ -44,7 +45,7 @@ pipeline {
         // =====================================================================
         stage('Checkout') {
             steps {
-                echo "===> [Stage 1/5] Checking out source code from Git repository..."
+                echo "===> [Stage 1/5] Checking out source code..."
                 checkout scm
             }
         }
@@ -69,11 +70,6 @@ pipeline {
         stage('Run Automated Tests') {
             steps {
                 echo "===> [Stage 3/5] Executing pytest test suite inside container..."
-                /*
-                 * Tests are executed inside the built container image.
-                 * If any pytest assertion fails, the command exits with non-zero,
-                 * immediately terminating the pipeline and preventing deployment.
-                 */
                 sh """
                     docker run --rm ${IMAGE_NAME}:${IMAGE_TAG} pytest test_app.py -v
                 """
@@ -85,13 +81,13 @@ pipeline {
         // =====================================================================
         stage('Deploy Application') {
             steps {
-                echo "===> [Stage 4/5] Deploying containerized application to ${params.DEPLOY_ENV} environment..."
+                echo "===> [Stage 4/5] Deploying containerized application..."
                 script {
-                    if (params.DEPLOY_ENV == 'local') {
+                    if (env.TARGET_ENV == 'local') {
                         sh """
-                            # Stop & remove any running production container
+                            # Stop and remove any prior container
                             if [ \$(docker ps -a -q -f name=^/${CONTAINER_NAME}\$) ]; then
-                                echo "Removing existing container '${CONTAINER_NAME}'..."
+                                echo "Removing pre-existing container '${CONTAINER_NAME}'..."
                                 docker stop ${CONTAINER_NAME} || true
                                 docker rm ${CONTAINER_NAME} || true
                             fi
@@ -104,17 +100,8 @@ pipeline {
                                 -p ${HOST_PORT}:5000 \
                                 ${IMAGE_NAME}:${IMAGE_TAG}
                         """
-                    } else if (params.DEPLOY_ENV == 'cloud') {
-                        echo "Cloud deployment target selected."
-                        /*
-                         * Cloud Deployment Pattern (e.g. AWS ECS / Cloud Run / Kubernetes):
-                         * In production, withCredentials wraps the cloud CLI or Docker push commands:
-                         *
-                         * withCredentials([usernamePassword(credentialsId: env.DOCKER_HUB_CREDS_ID, ...)]) {
-                         *     sh 'docker login -u $USER -p $PASS && docker push $IMAGE'
-                         * }
-                         */
-                        echo "Cloud credentials required: configure '${env.AWS_CREDS_ID}' in Jenkins Credentials."
+                    } else {
+                        echo "Cloud deployment target selected. Configure '${env.AWS_CREDS_ID}' in Jenkins."
                     }
                 }
             }
@@ -127,25 +114,24 @@ pipeline {
             steps {
                 echo "===> [Stage 5/5] Verifying application deployment health..."
                 script {
-                    if (params.DEPLOY_ENV == 'local') {
+                    if (env.TARGET_ENV == 'local') {
                         sh """
                             echo "Waiting for container initialization..."
                             sleep 3
 
-                            # Verify container status is running
+                            # Verify container status
                             docker ps -f name=${CONTAINER_NAME}
 
-                            # Verify the /health endpoint responds with HTTP 200
-                            # Using python urllib inside Jenkins to avoid curl dependency
+                            # Verify the /health endpoint returns HTTP 200 using python urllib
                             python3 -c "import urllib.request, json; \
                                 res = urllib.request.urlopen('http://localhost:${HOST_PORT}/health'); \
                                 data = json.loads(res.read().decode()); \
-                                assert res.status == 200, f'Expected 200 but got {res.status}'; \
-                                assert data.get('status') == 'healthy', 'Health check status is not healthy'; \
+                                assert res.status == 200, f'Expected 200, got {res.status}'; \
+                                assert data.get('status') == 'healthy', 'Status is not healthy'; \
                                 print('Deployment verification passed! Endpoint output:', data)"
                         """
                     } else {
-                        echo "Cloud verification: ping remote health endpoint when configured."
+                        echo "Cloud verification: ping remote health endpoint."
                     }
                 }
             }
@@ -169,7 +155,7 @@ pipeline {
             echo "================================================================="
         }
         always {
-            echo "Pipeline run finished."
+            echo "Pipeline execution finished."
         }
     }
 }
