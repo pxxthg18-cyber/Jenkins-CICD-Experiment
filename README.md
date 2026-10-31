@@ -1,243 +1,143 @@
-# Experiment: Automated CI/CD Pipeline for a Containerized Application
+# Lab Experiment Report & Setup Manual
 
-> **College Lab Experiment Title:**  
+> **Experiment Title:**  
 > *“Set up a CI/CD pipeline to automate the building, testing, and deployment of a containerized application.”*
 
 ---
 
-## 1. Overview & Objectives
+## 1. System Environment & Inspection Results
 
-In modern DevOps practices, **Continuous Integration (CI)** and **Continuous Deployment (CD)** allow developers to automatically validate code changes, run automated tests, package software into immutable container images, and deploy them with minimal human intervention.
-
-### Experiment Objectives:
-1. Develop a lightweight web service with a status endpoint using **Python & Flask**.
-2. Write automated unit tests using **pytest**.
-3. Package the application as an isolated container image using **Docker** (`jenkins-cicd-flask-app`).
-4. Automate the end-to-end workflow using a **declarative Jenkins pipeline** (`Jenkinsfile`):
-   - **Checkout:** Pull source code from Git.
-   - **Build:** Create the Docker container image.
-   - **Test:** Run automated unit tests inside the container.
-   - **Deploy:** Deploy the containerized application using configurable target environments.
+| Component | Status | Details / Path |
+| :--- | :--- | :--- |
+| **Operating System** | Configured | Microsoft Windows 11 / x64 |
+| **Java JDK** | **Java 21 LTS** | Eclipse Adoptium Temurin `21.0.13.9-hotspot`<br>`JAVA_HOME = C:\Users\preth\AppData\Local\Programs\Eclipse Adoptium\jdk-21.0.13.9-hotspot` |
+| **Git Engine** | Installed | `git version 2.56.0.windows.2` |
+| **Docker Desktop** | Active | `Docker version 29.9.2` (Linux engine on Windows WSL2 backend) |
+| **Jenkins Server** | Active | Version `2.580.2` running at [http://localhost:8080](http://localhost:8080) |
+| **Jenkins Docker Access** | Configured | Docker CLI (`26.1.5`) installed inside container with `/var/run/docker.sock` access |
+| **Deployed Container** | Active | Container `flask-app-prod` running on [http://localhost:5000](http://localhost:5000) |
 
 ---
 
-## 2. Project File Structure
+## 2. Project Architecture & Pipeline Structure
 
 ```text
 Jenkins-CICD-Experiment/
-├── app.py              # Flask web application with '/' and '/health' endpoints
-├── requirements.txt    # Application and testing dependencies (Flask, pytest, gunicorn)
-├── Dockerfile          # Instructions to build 'jenkins-cicd-flask-app' image
-├── test_app.py         # Automated unit tests evaluated via pytest
-├── Jenkinsfile         # Declarative 4-stage Jenkins CI/CD pipeline
-├── .dockerignore       # Specifies files excluded from Docker build context
-└── README.md           # Documentation, lab setup instructions, and viva preparation
+├── app.py                  # Flask web service with '/' and '/health' endpoints
+├── requirements.txt        # Flask==3.0.3, pytest==8.2.2, gunicorn==22.0.0
+├── Dockerfile              # Containerization for 'jenkins-cicd-flask-app'
+├── test_app.py             # 5 automated test cases executed via pytest
+├── verify_deployment.py    # Post-deployment probe verifying live container health
+├── Jenkinsfile             # 5-stage declarative Jenkins pipeline
+├── .dockerignore           # Excludes git, pycache, venv from Docker build context
+└── README.md               # Laboratory documentation and evaluation guide
 ```
 
 ---
 
-## 3. Prerequisites
+## 3. Jenkins Declarative Pipeline Stages
 
-Ensure the following tools are installed on your workstation or lab server:
+The pipeline defines five automated stages in [Jenkinsfile](file:///c:/Users/preth/OneDrive/Desktop/Jenkins-CICD-Experiment/Jenkinsfile):
 
-| Tool | Version | Purpose |
-| :--- | :--- | :--- |
-| **Python** | 3.10+ | Local development and test verification |
-| **Git** | 2.x+ | Source code version control |
-| **Docker** | 20.x+ | Container engine to build and run container images |
-| **Jenkins** | 2.400+ | Automation server to orchestrate the CI/CD pipeline |
+```text
+┌─────────────────┐     ┌──────────────────────┐     ┌────────────────────────┐
+│ 1. Checkout     │ ──> │ 2. Build Docker      │ ──> │ 3. Run Automated Tests │
+│    Source Code  │     │    Image             │     │    (pytest in image)   │
+└─────────────────┘     └──────────────────────┘     └────────────────────────┘
+                                                                  │
+                                                                  ▼
+┌─────────────────┐     ┌──────────────────────┐
+│ 5. Verify       │ <── │ 4. Deploy            │
+│    Deployment   │     │    Application       │
+└─────────────────┘     └──────────────────────┘
+```
+
+1. **Checkout:** Clones the repository revision matching the trigger.
+2. **Build Docker Image:** Executes `docker build -t jenkins-cicd-flask-app:${BUILD_NUMBER} -t jenkins-cicd-flask-app:latest .`
+3. **Run Automated Tests:** Runs `pytest test_app.py -v` *inside* the newly built Docker image. If any assertion fails, the command exits with code 1, immediately halting the pipeline before deployment.
+4. **Deploy Application:** Stops and cleans up any existing `flask-app-prod` container, then spins up the new container with `--restart unless-stopped` on port 5000.
+5. **Verify Deployment:** Executes `python3 verify_deployment.py 5000`, testing the live container's `/health` endpoint to ensure HTTP 200 before marking the build as `SUCCESS`.
 
 ---
 
-## 4. Running the Application Locally (Without Jenkins)
+## 4. Live Verification Output
 
-Before configuring Jenkins, it is recommended to test each component individually.
+### Actual Jenkins Console Output (Build #6 — Status: SUCCESS)
+```text
+[Pipeline] stage: Checkout
+Checking out Revision 9d95a50...
+Commit message: "Add verify_deployment.py script and update Stage 5 in Jenkinsfile"
 
-### Step 4.1: Clone or Open the Repository
-```bash
-cd Jenkins-CICD-Experiment
-```
+[Pipeline] stage: Build Docker Image
+===> [Stage 2/5] Building Docker image: jenkins-cicd-flask-app:6...
++ docker build -t jenkins-cicd-flask-app:6 -t jenkins-cicd-flask-app:latest .
 
-### Step 4.2: Create a Virtual Environment & Install Dependencies
-```bash
-# Create virtual environment
-python -m venv venv
+[Pipeline] stage: Run Automated Tests
+===> [Stage 3/5] Executing pytest test suite inside container...
++ docker run --rm jenkins-cicd-flask-app:6 pytest test_app.py -v
+============================= test session starts ==============================
+collected 5 items
+test_app.py::test_home_page_status_code PASSED                           [ 20%]
+test_app.py::test_home_page_content PASSED                               [ 40%]
+test_app.py::test_health_endpoint_status PASSED                          [ 60%]
+test_app.py::test_health_endpoint_json_payload PASSED                    [ 80%]
+test_app.py::test_invalid_route_returns_404 PASSED                       [100%]
+============================== 5 passed in 0.14s ===============================
 
-# Activate virtual environment
-# On Windows (PowerShell):
-.\venv\Scripts\Activate.ps1
-# On Linux / macOS:
-source venv/bin/activate
+[Pipeline] stage: Deploy Application
+===> [Stage 4/5] Deploying containerized application...
+Starting container 'flask-app-prod' on port 5000...
++ docker run -d --name flask-app-prod --restart unless-stopped -p 5000:5000 jenkins-cicd-flask-app:6
 
-# Install dependencies
-pip install -r requirements.txt
-```
+[Pipeline] stage: Verify Deployment
+===> [Stage 5/5] Verifying application deployment health...
+Waiting for container initialization...
+Checking deployment health at http://host.docker.internal:5000/health...
+SUCCESS: Health check verified on http://host.docker.internal:5000/health!
+Payload: {'app': 'jenkins-cicd-flask-app', 'status': 'healthy', 'version': '1.0.1'}
 
-### Step 4.3: Run Automated Unit Tests
-```bash
-python -m pytest test_app.py -v
-```
-*Expected Output:* 5 tests passing (`PASSED [100%]`).
-
-### Step 4.4: Run the Flask Web Application
-```bash
-python app.py
-```
-Open your browser and navigate to:
-- **Home UI:** `http://localhost:5000`
-- **Health Check API:** `http://localhost:5000/health` (Returns `{"status": "healthy", "app": "jenkins-cicd-flask-app", "version": "1.0.0"}`)
-
----
-
-## 5. Containerizing with Docker
-
-### Step 5.1: Build the Docker Image
-Build the container image using the specified name `jenkins-cicd-flask-app`:
-```bash
-docker build -t jenkins-cicd-flask-app:latest .
-```
-
-### Step 5.2: Test Inside the Container
-Verify that automated tests pass inside the container environment:
-```bash
-docker run --rm jenkins-cicd-flask-app:latest pytest test_app.py -v
-```
-
-### Step 5.3: Run the Container
-```bash
-docker run -d --name flask-app-test -p 5000:5000 jenkins-cicd-flask-app:latest
-```
-Verify the container is running:
-```bash
-docker ps
-curl http://localhost:5000/health
-```
-
-Stop and clean up:
-```bash
-docker stop flask-app-test
-docker rm flask-app-test
+[Pipeline] echo
+=================================================================
+CI/CD Pipeline Completed Successfully!
+Application is live at: http://localhost:5000
+Health endpoint: http://localhost:5000/health
+=================================================================
+Finished: SUCCESS
 ```
 
 ---
 
-## 6. Jenkins CI/CD Pipeline Setup
+## 5. How to Connect to Your Remote GitHub Repository
 
-### Step 6.1: Required Jenkins Plugins
-In Jenkins, navigate to **Manage Jenkins** &rarr; **Plugins** &rarr; **Available Plugins**, and install:
-1. **Pipeline** (Workflow Aggregator)
-2. **Git Plugin**
-3. **Docker Pipeline** / **Docker Plugin**
-4. **Credentials Binding Plugin**
+To demonstrate automated webhooks and Git triggers with your personal GitHub account:
 
-### Step 6.2: Ensure Jenkins Has Docker Execution Permissions
-If Jenkins runs on a Linux host, grant the `jenkins` system user access to the Docker daemon socket:
-```bash
-sudo usermod -aG docker jenkins
-sudo systemctl restart jenkins
-```
+### Step 5.1: Create a GitHub Repository
+1. Go to [github.com/new](https://github.com/new) and create a repository named `Jenkins-CICD-Experiment`.
+2. Add your GitHub remote in PowerShell:
+   ```powershell
+   git remote add origin https://github.com/<YOUR_GITHUB_USERNAME>/Jenkins-CICD-Experiment.git
+   git push -u origin main
+   ```
 
-### Step 6.3: Create the Pipeline Job in Jenkins
-1. Click **New Item** on the Jenkins dashboard.
-2. Enter item name: `flask-cicd-pipeline`.
-3. Select **Pipeline** and click **OK**.
-4. Scroll to the **Pipeline** section:
-   - **Definition:** Select *Pipeline script from SCM*.
-   - **SCM:** Select *Git*.
-   - **Repository URL:** Enter your Git repository URL (e.g., GitHub or local Git repo).
-   - **Branch Specifier:** `*/main` (or `*/master`).
-   - **Script Path:** `Jenkinsfile`.
-5. Click **Save**.
+### Step 5.2: Update the Jenkins Job Git SCM URL
+1. Open Jenkins at [http://localhost:8080/job/flask-cicd-pipeline/configure](http://localhost:8080/job/flask-cicd-pipeline/configure).
+2. Under **Pipeline** &rarr; **Repository URL**, replace the internal path with:
+   `https://github.com/<YOUR_GITHUB_USERNAME>/Jenkins-CICD-Experiment.git`
+3. If the repository is private, select your GitHub Personal Access Token under **Credentials**.
+4. Click **Save**.
 
-### Step 6.4: Run the Pipeline
-1. Click **Build with Parameters** (or **Build Now** for the first run so Jenkins reads parameters).
-2. Choose your deployment strategy:
-   - `local_container`: (Recommended for college labs) Spins up the container directly on port 5000 of the Jenkins host.
-   - `docker_hub`: Pushes the image to Docker Hub registry.
-   - `cloud_vm_or_cluster`: Deploys to a remote VM or cloud cluster.
-3. Click **Build**.
-4. Monitor the stage view as stages complete:
-   - `Checkout Source Code` &rarr; `Build Docker Image` &rarr; `Run Automated Tests` &rarr; `Deploy Containerized Application`.
+### Step 5.3: Automated Trigger via SCM Polling / Webhook
+- **SCM Polling (Built-in):** Jenkins polls GitHub every 2 minutes (`H/2 * * * *`). Any push to `main` automatically triggers a build.
+- **GitHub Webhook (Instant Trigger):**
+  1. In your GitHub repository, go to **Settings** &rarr; **Webhooks** &rarr; **Add webhook**.
+  2. Set Payload URL: `http://<your-public-ip-or-ngrok>:8080/github-webhook/`
+  3. Content type: `application/json`
+  4. Trigger: *Just the push event*.
 
 ---
 
-## 7. Deployment Configuration & Cloud Credentials Guide
+## 6. Accessing Your Deployed Application & Jenkins Dashboard
 
-The deployment stage in `Jenkinsfile` is configurable. Here is what is required for each deployment mode:
-
-### 1. Local Container Deployment (`local_container`)
-- **Use Case:** College lab evaluation and local demonstration.
-- **Requirements:** Docker daemon running on the Jenkins agent.
-- **Credentials Required:** None (uses local Docker socket).
-- **Result:** Stops any existing `flask-app-prod` container and launches the new build on `http://localhost:5000`.
-
-### 2. Docker Hub Registry Deployment (`docker_hub`)
-- **Use Case:** Storing versioned images in a central registry for remote servers to pull.
-- **Credentials Setup in Jenkins:**
-  1. Navigate to **Manage Jenkins** &rarr; **Credentials** &rarr; **System** &rarr; **Global credentials**.
-  2. Click **Add Credentials**:
-     - **Kind:** *Username with password*
-     - **Scope:** *Global*
-     - **Username:** Your Docker Hub username
-     - **Password:** Your Docker Hub Personal Access Token (PAT)
-     - **ID:** `docker-hub-credentials` (matches `DOCKER_CREDENTIALS_ID` in `Jenkinsfile`)
-  3. Enter your Docker Hub username in the build parameter `DOCKER_REGISTRY_USER`.
-
-### 3. Cloud Deployment (`cloud_vm_or_cluster`)
-- **Use Case:** Production deployments to AWS, Azure, Google Cloud Platform (GCP), or a remote Linux VPS.
-- **Required Cloud Configuration & Credentials:**
-  - **AWS (EC2 / ECS / EKS):**
-    - Install AWS CLI on the Jenkins agent.
-    - Add AWS Access Key ID and Secret Access Key to Jenkins Credentials with ID `aws-cloud-credentials`.
-    - Configure IAM policies granting permissions to Amazon ECR (`ecr:GetAuthorizationToken`, `ecr:PutImage`) and ECS/EKS.
-  - **Remote Linux VM via SSH:**
-    - Generate an SSH keypair (`ssh-keygen`).
-    - Add the private key to Jenkins Credentials as **SSH Username with private key** with ID `cloud-server-ssh-key`.
-    - Install public key on target VM in `~/.ssh/authorized_keys`.
-    - Deployment script executes:
-      ```bash
-      ssh -o StrictHostKeyChecking=no user@cloud-ip \
-        "docker pull ${REGISTRY_USER}/jenkins-cicd-flask-app:latest && \
-         docker stop flask-app || true && \
-         docker run -d --name flask-app -p 80:5000 ${REGISTRY_USER}/jenkins-cicd-flask-app:latest"
-      ```
-
----
-
-## 8. College Lab Viva / Oral Exam Questions & Answers
-
-<details>
-<summary><strong>Q1: What is the difference between Continuous Integration (CI) and Continuous Deployment (CD)?</strong></summary>
-<blockquote>
-<strong>CI (Continuous Integration):</strong> Automatically merges developer code into a shared repository, builds the application, and runs automated tests (pytest) to catch integration errors early.<br>
-<strong>CD (Continuous Deployment):</strong> Automatically packages the tested build into a production-ready artifact (Docker image) and deploys it directly to target environments without manual intervention.
-</blockquote>
-</details>
-
-<details>
-<summary><strong>Q2: Why run unit tests inside the Docker container rather than on the Jenkins host?</strong></summary>
-<blockquote>
-Running tests inside the built container ensures parity between the test environment and the production environment. It verifies that Python dependencies, system libraries, and file paths inside the image work exactly as expected.
-</blockquote>
-</details>
-
-<details>
-<summary><strong>Q3: What is the purpose of the <code>/health</code> endpoint?</strong></summary>
-<blockquote>
-The health check endpoint provides a lightweight, automated probe used by Docker's <code>HEALTHCHECK</code> instruction, Kubernetes liveness/readiness probes, and load balancers to determine whether the web application is running and responding to requests.
-</blockquote>
-</details>
-
-<details>
-<summary><strong>Q4: Why use <code>.dockerignore</code>?</strong></summary>
-<blockquote>
-<code>.dockerignore</code> excludes unnecessary files (such as <code>.git</code>, virtual environments <code>venv/</code>, test caches, and documentation) from being sent to the Docker daemon. This reduces image size, accelerates build times, and prevents sensitive files from leaking into the container.
-</blockquote>
-</details>
-
-<details>
-<summary><strong>Q5: How does Jenkins securely handle secrets like Docker Hub or Cloud credentials?</strong></summary>
-<blockquote>
-Jenkins uses its built-in Credentials Store. Secrets are encrypted on disk and injected into pipelines as masked environment variables using the <code>withCredentials</code> block. They are never hardcoded in scripts or exposed in console logs.
-</blockquote>
-</details>
+- **Jenkins Pipeline GUI:** [http://localhost:8080/job/flask-cicd-pipeline/](http://localhost:8080/job/flask-cicd-pipeline/)
+- **Live Flask Application UI:** [http://localhost:5000](http://localhost:5000)
+- **Live Health Status Endpoint:** [http://localhost:5000/health](http://localhost:5000/health)
