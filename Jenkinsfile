@@ -124,11 +124,18 @@ pipeline {
 
                             # Verify the /health endpoint returns HTTP 200 using python urllib
                             python3 -c "import urllib.request, json; \
-                                res = urllib.request.urlopen('http://localhost:${HOST_PORT}/health'); \
-                                data = json.loads(res.read().decode()); \
-                                assert res.status == 200, f'Expected 200, got {res.status}'; \
-                                assert data.get('status') == 'healthy', 'Status is not healthy'; \
-                                print('Deployment verification passed! Endpoint output:', data)"
+                                urls = ['http://host.docker.internal:${HOST_PORT}/health', 'http://localhost:${HOST_PORT}/health']; \
+                                data = None; \
+                                for u in urls: \
+                                    try: \
+                                        res = urllib.request.urlopen(u, timeout=5); \
+                                        if res.status == 200: \
+                                            data = json.loads(res.read().decode()); \
+                                            print(f'Deployment verification passed on {u}! Output:', data); \
+                                            break; \
+                                    except Exception as e: \
+                                        pass; \
+                                assert data is not None and data.get('status') == 'healthy', 'Health check failed on all URLs'"
                         """
                     } else {
                         echo "Cloud verification: ping remote health endpoint."
